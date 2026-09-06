@@ -74,6 +74,7 @@ class PlantUmlActivityParser {
         const val STYLE_EDGE_COLOR_KEY = "plantuml.activity.style.edge.color"
 
         private const val LANE_STYLE_SEPARATOR = "|||"
+        private val SIMPLE_NAME_REGEX = Regex("[A-Za-z0-9_.:-]+")
     }
 
     private sealed interface Frame {
@@ -186,11 +187,13 @@ class PlantUmlActivityParser {
             isSwimlane(trimmed) -> switchSwimlane(trimmed)
             isSyncBar(trimmed) -> addSyncBar(trimmed)
             trimmed.startsWith("#") && ':' in trimmed -> addStyledAction(trimmed)
-            trimmed.startsWith(":") && trimmed.endsWith(";") -> addBlock(ActivityBlock.Action(RichLabel.Plain(trimmed.removePrefix(":").removeSuffix(";").trim())))
+            trimmed.startsWith(":") && trimmed.endsWith(";") && findLegacyArrowIndex(trimmed) == null ->
+                addBlock(ActivityBlock.Action(RichLabel.Plain(trimmed.removePrefix(":").removeSuffix(";").trim())))
             trimmed.startsWith("if(", ignoreCase = true) ||
                 (trimmed.startsWith("if ", ignoreCase = true) && extractParenCondition(removePrefixIgnoreCase(trimmed, "if").trim()) != null) -> openIf(trimmed)
             isLegacyIf(trimmed) -> openLegacyIf(trimmed)
             trimmed.startsWith("elseif ", ignoreCase = true) || trimmed.startsWith("elseif(", ignoreCase = true) -> switchElseIf(trimmed)
+            startsWithKeyword(trimmed, "else if") -> switchElseIfLegacy(trimmed)
             isElseKeyword(trimmed) -> switchElse()
             trimmed.equals("endif", ignoreCase = true) -> closeIf()
             trimmed.startsWith("while ", ignoreCase = true) || trimmed.startsWith("while(", ignoreCase = true) -> openWhile(trimmed)
@@ -334,6 +337,16 @@ class PlantUmlActivityParser {
         return session.emptyBatch()
     }
 
+    private fun switchElseIfLegacy(line: String): IrPatchBatch {
+        val frame = frames.lastOrNull() as? Frame.IfFrame ?: return errorBatch("'else if' without matching 'if'")
+        if (frame.branches.last().cond == null) return errorBatch("'else if' cannot appear after 'else'")
+        val cond = parseLegacyIfCondition(removePrefixIgnoreCase(line, "else").trim())
+            ?: return errorBatch("Invalid PlantUML activity else-if syntax: $line")
+        frame.branches += IfBranch(cond = RichLabel.Plain(cond))
+        frame.activeIndex = frame.branches.lastIndex
+        return session.emptyBatch()
+    }
+
     private fun switchElseIf(line: String): IrPatchBatch {
         val frame = frames.lastOrNull() as? Frame.IfFrame ?: return errorBatch("'elseif' without matching 'if'")
         if (frame.branches.last().cond == null) return errorBatch("'elseif' cannot appear after 'else'")
@@ -354,7 +367,7 @@ class PlantUmlActivityParser {
     }
 
     private fun openWhile(line: String): IrPatchBatch {
-        val cond = Regex("^while\\s*\\((.*?)\\)", RegexOption.IGNORE_CASE).find(line)?.groupValues?.getOrNull(1)?.trim()
+        val cond = extractParenCondition(removePrefixIgnoreCase(line, "while").trim())
             ?: return errorBatch("Invalid PlantUML activity while syntax: $line")
         frames.addLast(Frame.WhileFrame(cond = RichLabel.Plain(cond)))
         return session.emptyBatch()
@@ -430,6 +443,16 @@ class PlantUmlActivityParser {
 
     private fun parseLegacyArrow(line: String): IrPatchBatch {
         val parsed = parseLegacyArrowParts(line) ?: return errorBatch("Invalid PlantUML activity legacy arrow syntax: $line")
+        val residualDiagnostics = if (findLegacyArrowIndex(parsed.third) != null) {
+            listOf(addDiagnostic(Diagnostic(Severity.ERROR, "Multiple statements on one legacy arrow line: trailing content ignored", "PLANTUML-E007")))
+        } else {
+            emptyList()
+        }
+        val batch = consumeLegacyArrow(parsed)
+        return if (residualDiagnostics.isEmpty()) batch else IrPatchBatch(session.value, residualDiagnostics + batch.patches)
+    }
+
+    private fun consumeLegacyArrow(parsed: Triple<String?, String?, String>): IrPatchBatch {
         val source = parsed.first
         val edgeLabel = parsed.second
         val target = parsed.third
@@ -523,7 +546,7 @@ class PlantUmlActivityParser {
             condPart.startsWith("\"") && condPart.endsWith("\"") && condPart.length >= 2 -> condPart.substring(1, condPart.length - 1).trim()
             condPart.startsWith("(") && condPart.endsWith(")") && condPart.length >= 2 -> condPart.substring(1, condPart.length - 1).trim()
             else -> null
-        }.takeIf { !it.isNullOrEmpty() }
+        }
     }
 
     private fun parsePartitionDecl(line: String): Pair<String, String?>? {
@@ -543,6 +566,8 @@ class PlantUmlActivityParser {
 
     private fun parseLegacyTarget(token: String): LegacyTarget {
         val trimmed = token.trim()
+        val inner = stripColonActionShell(trimmed)
+        if (inner != null) return parseLegacyTarget(inner)
         if (isLegacyStart(trimmed)) return LegacyTarget(LegacyTarget.Kind.Start)
         if (isLegacyIf(trimmed)) return LegacyTarget(LegacyTarget.Kind.If)
         parseSyncBarLabel(trimmed)?.let { sync ->
@@ -605,8 +630,16 @@ class PlantUmlActivityParser {
     }
 
     private fun findLegacyArrowIndex(line: String): Int? {
-        val candidates = listOf("-up->", "-down->", "-left->", "-right->", "-->", "->")
-        return candidates.map { candidate -> line.indexOf(candidate) }.filter { it >= 0 }.minOrNull()
+        var inQuote = false
+        var index = 0
+        while (index < line.length) {
+            when (line[index]) {
+                '"' -> inQuote = !inQuote
+                '-' -> if (!inQuote && readLegacyArrowToken(line, index) != null) return index
+            }
+            index++
+        }
+        return null
     }
 
     private fun readLegacyArrowToken(line: String, start: Int): String? {
@@ -616,9 +649,15 @@ class PlantUmlActivityParser {
 
     private fun toRefKey(token: String): String {
         val trimmed = token.trim()
+        stripColonActionShell(trimmed)?.let { return nameRefKey(it) }
         parseSyncBarLabel(trimmed)?.let { return syncRefKey(it) }
         if (trimmed.startsWith("\"")) return labelRefKey(parseLegacyTargetLabel(trimmed) ?: trimmed.removeSurrounding("\""))
         return nameRefKey(trimmed)
+    }
+
+    private fun stripColonActionShell(token: String): String? {
+        if (token.length < 2 || !token.startsWith(":") || !token.endsWith(";")) return null
+        return token.substring(1, token.length - 1).trim().ifEmpty { null }
     }
 
     private fun autoRegisterRefs(block: ActivityBlock) {
@@ -627,7 +666,7 @@ class PlantUmlActivityParser {
         if (label.isEmpty()) return
         currentTarget() += ActivityBlock.Note(RichLabel.Plain(NODE_REF_PREFIX + labelRefKey(label)))
         registerRef(labelRefKey(label))
-        if (label.matches(Regex("[A-Za-z0-9_.:-]+"))) {
+        if (label.matches(SIMPLE_NAME_REGEX)) {
             currentTarget() += ActivityBlock.Note(RichLabel.Plain(NODE_REF_PREFIX + nameRefKey(label)))
             registerRef(nameRefKey(label))
         }
@@ -744,17 +783,37 @@ class PlantUmlActivityParser {
     private fun warnUnsupportedSkinparam(line: String): IrPatchBatch =
         IrPatchBatch(session.value, listOf(addDiagnostic(Diagnostic(Severity.WARNING, "Unsupported '$line' ignored", "PLANTUML-W001"))))
 
-    private fun extractParenCondition(body: String): String? =
-        Regex("^\\s*\\((.*?)\\)").find(body)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() }
+    private fun extractParenCondition(body: String): String? {
+        var index = 0
+        while (index < body.length && body[index].isWhitespace()) index++
+        if (index >= body.length || body[index] != '(') return null
+        var depth = 0
+        val start = index
+        while (index < body.length) {
+            when (body[index]) {
+                '(' -> depth++
+                ')' -> {
+                    depth--
+                    if (depth == 0) {
+                        return body.substring(start + 1, index).trim().takeIf { it.isNotEmpty() }
+                    }
+                }
+            }
+            index++
+        }
+        return null
+    }
 
     private fun removePrefixIgnoreCase(line: String, prefix: String): String =
         if (line.startsWith(prefix, ignoreCase = true)) line.drop(prefix.length) else line
 
-    private fun isElseKeyword(line: String): Boolean {
-        if (!line.startsWith("else", ignoreCase = true)) return false
-        val next = line.getOrNull(4)
+    private fun startsWithKeyword(line: String, keyword: String): Boolean {
+        if (!line.startsWith(keyword, ignoreCase = true)) return false
+        val next = line.getOrNull(keyword.length)
         return next == null || next.isWhitespace() || next == '('
     }
+
+    private fun isElseKeyword(line: String): Boolean = startsWithKeyword(line, "else")
 
     private fun buildIfElse(branches: List<IfBranch>): ActivityBlock.IfElse {
         require(branches.isNotEmpty())

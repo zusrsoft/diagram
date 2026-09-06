@@ -74,7 +74,7 @@ sealed interface RichLabel {
 | `XYChartIR(axes, series)` | 坐标系 + 多系列 | xyChart |
 | `SankeyIR(nodes, flows)` | 流量分配 | sankey |
 | `GitGraphIR(commits, branches)` | 提交 DAG + 分支 | gitGraph |
-| `ActivityIR(start, blocks, end)` | 链式控制流 | PlantUML activity |
+| `ActivityIR(blocks, sourceLanguage, styleHints)` | 链式控制流块（Action / Note / IfElse / While / ForkJoin，起止节点与泳道以 `styleHints` + 内部前缀 marker Note 表达） | PlantUML activity |
 | `WireframeIR(rootBox, children)` | 嵌套 UI 盒 | PlantUML wireframe (Salt) |
 | `StructIR(root)` | 任意嵌套键值树 | PlantUML json / yaml / ditaa |
 

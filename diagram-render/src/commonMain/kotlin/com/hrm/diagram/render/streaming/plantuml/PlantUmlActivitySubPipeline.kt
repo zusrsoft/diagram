@@ -158,9 +158,14 @@ internal class PlantUmlActivitySubPipeline(
         if (hasStop) {
             val stop = makeNode("stop", "Stop", NodeShape.EndCircle, style(stop = true, palette = palette))
             nodes += stop
-            for (exit in sequence.exits) edges += solidEdge(exit, stop.id, palette = palette)
+            val stopEdgeSources = LinkedHashSet<NodeId>()
+            for (exit in sequence.exits) {
+                if (stopEdgeSources.add(exit)) edges += solidEdge(exit, stop.id, palette = palette)
+            }
             for (ref in stopRefs) {
-                refMap[ref]?.let { source -> edges += solidEdge(source, stop.id, palette = palette) }
+                refMap[ref]?.let { source ->
+                    if (stopEdgeSources.add(source)) edges += solidEdge(source, stop.id, palette = palette)
+                }
             }
         }
         val clusters = buildLaneClusters(nodes)

@@ -616,4 +616,221 @@ class PlantUmlActivityParserTest {
         assertEquals(RichLabel.Plain("İİİİİİ"), block.cond)
         assertEquals(ActivityBlock.Action(RichLabel.Plain("Done")), block.thenBranch.single())
     }
+
+    @Test
+    fun multi_statement_line_reports_residual_diagnostic() {
+        val parser = parse("(*) --> \"First Action\" \"First Action\" --> (*)\n")
+        assertTrue(parser.diagnosticsSnapshot().any { it.code == "PLANTUML-E007" }, parser.diagnosticsSnapshot().toString())
+        val actions = assertIs<ActivityIR>(parser.snapshot()).blocks.filterIsInstance<ActivityBlock.Action>()
+        assertEquals(listOf(ActivityBlock.Action(RichLabel.Plain("First Action"))), actions)
+    }
+
+    @Test
+    fun double_arrow_line_reports_residual_diagnostic() {
+        val parser = parse("(*) --> \"First\" --> (*)\n")
+        assertTrue(parser.diagnosticsSnapshot().any { it.code == "PLANTUML-E007" }, parser.diagnosticsSnapshot().toString())
+        val actions = assertIs<ActivityIR>(parser.snapshot()).blocks.filterIsInstance<ActivityBlock.Action>()
+        assertEquals(listOf(ActivityBlock.Action(RichLabel.Plain("First"))), actions)
+    }
+
+    @Test
+    fun quoted_label_with_embedded_arrow_is_not_split() {
+        val parser = parse("\"Play -> Pause\" --> \"Next\"\n")
+        assertTrue(parser.diagnosticsSnapshot().isEmpty(), parser.diagnosticsSnapshot().toString())
+        val actions = assertIs<ActivityIR>(parser.snapshot()).blocks.filterIsInstance<ActivityBlock.Action>()
+        val labels = actions.map { (it.label as RichLabel.Plain).text }
+        assertTrue(labels.contains("Next"), "expected target action 'Next', got: $labels")
+        assertTrue(labels.none { it.contains("->") }, "no action label should contain a split arrow: $labels")
+    }
+
+    @Test
+    fun if_condition_with_nested_parens_keeps_full_text() {
+        val parser = parse(
+            """
+            if (a && (b || c))
+              :Do;
+            endif
+            """.trimIndent() + "\n",
+        )
+        assertTrue(parser.diagnosticsSnapshot().isEmpty(), parser.diagnosticsSnapshot().toString())
+        val block = assertIs<ActivityBlock.IfElse>(visibleBlocks(assertIs<ActivityIR>(parser.snapshot())).single())
+        assertEquals(RichLabel.Plain("a && (b || c)"), block.cond)
+    }
+
+    @Test
+    fun while_condition_with_nested_parens_keeps_full_text() {
+        val parser = parse(
+            """
+            while (a && (b))
+              :Do;
+            endwhile
+            """.trimIndent() + "\n",
+        )
+        assertTrue(parser.diagnosticsSnapshot().isEmpty(), parser.diagnosticsSnapshot().toString())
+        val block = assertIs<ActivityBlock.While>(visibleBlocks(assertIs<ActivityIR>(parser.snapshot())).single())
+        assertEquals(RichLabel.Plain("a && (b)"), block.cond)
+    }
+
+    @Test
+    fun elseif_condition_with_nested_parens_keeps_full_text() {
+        val parser = parse(
+            """
+            if (x)
+              :A;
+            elseif (y && (z))
+              :B;
+            endif
+            """.trimIndent() + "\n",
+        )
+        assertTrue(parser.diagnosticsSnapshot().isEmpty(), parser.diagnosticsSnapshot().toString())
+        val root = assertIs<ActivityBlock.IfElse>(visibleBlocks(assertIs<ActivityIR>(parser.snapshot())).single())
+        val nested = assertIs<ActivityBlock.IfElse>(root.elseBranch.single())
+        assertEquals(RichLabel.Plain("y && (z)"), nested.cond)
+    }
+
+    @Test
+    fun else_if_space_form_opens_nested_branch() {
+        val parser = parse(
+            """
+            if (x)
+              :A;
+            else if "y" then
+              :B;
+            else
+              :C;
+            endif
+            """.trimIndent() + "\n",
+        )
+        assertTrue(parser.diagnosticsSnapshot().isEmpty(), parser.diagnosticsSnapshot().toString())
+        val root = assertIs<ActivityBlock.IfElse>(visibleBlocks(assertIs<ActivityIR>(parser.snapshot())).single())
+        assertEquals(RichLabel.Plain("x"), root.cond)
+        assertEquals(ActivityBlock.Action(RichLabel.Plain("A")), root.thenBranch.single())
+        val nested = assertIs<ActivityBlock.IfElse>(root.elseBranch.single())
+        assertEquals(RichLabel.Plain("y"), nested.cond)
+        assertEquals(ActivityBlock.Action(RichLabel.Plain("B")), nested.thenBranch.single())
+        assertEquals(ActivityBlock.Action(RichLabel.Plain("C")), nested.elseBranch.single())
+    }
+
+    @Test
+    fun else_if_without_matching_if_reports_diagnostic() {
+        val parser = parse("else if \"y\" then\n:After;\n")
+        assertTrue(parser.diagnosticsSnapshot().any { it.code == "PLANTUML-E007" })
+        val ir = assertIs<ActivityIR>(parser.snapshot())
+        assertEquals(ActivityBlock.Action(RichLabel.Plain("After")), visibleBlocks(ir).single())
+    }
+
+    @Test
+    fun legacy_if_with_empty_quoted_condition_is_parsed() {
+        val parser = parse(
+            """
+            (*) --> if "" then
+              --> "ok"
+            endif
+            """.trimIndent() + "\n",
+        )
+        assertTrue(parser.diagnosticsSnapshot().isEmpty(), parser.diagnosticsSnapshot().toString())
+        val ir = assertIs<ActivityIR>(parser.snapshot())
+        val block = assertIs<ActivityBlock.IfElse>(visibleBlocks(ir).single())
+        assertEquals(RichLabel.Plain(""), block.cond)
+    }
+
+    @Test
+    fun colon_action_as_arrow_target_is_unwrapped() {
+        val parser = parse("(*) --> :step;\n")
+        assertTrue(parser.diagnosticsSnapshot().isEmpty(), parser.diagnosticsSnapshot().toString())
+        val actions = assertIs<ActivityIR>(parser.snapshot()).blocks.filterIsInstance<ActivityBlock.Action>()
+        assertEquals(listOf(ActivityBlock.Action(RichLabel.Plain("step"))), actions)
+    }
+
+    @Test
+    fun colon_action_arrow_chain_is_not_swallowed_as_single_action() {
+        val parser = parse(
+            """
+            :prep;
+            :prep; --> :next;
+            """.trimIndent() + "\n",
+        )
+        assertTrue(parser.diagnosticsSnapshot().isEmpty(), parser.diagnosticsSnapshot().toString())
+        val ir = assertIs<ActivityIR>(parser.snapshot())
+        val actions = ir.blocks.filterIsInstance<ActivityBlock.Action>().map { (it.label as RichLabel.Plain).text }
+        assertTrue(actions.contains("prep"), "actions: $actions")
+        assertTrue(actions.contains("next"), "actions: $actions")
+        assertTrue(actions.none { it.contains("->") }, "no action label should contain an arrow: $actions")
+        val texts = ir.blocks.mapNotNull { (it as? ActivityBlock.Note)?.text as? RichLabel.Plain }.map { it.text }
+        assertTrue(texts.any { it == "${PlantUmlActivityParser.EDGE_STOP_PREFIX}name:prep" } || texts.any { it == "${PlantUmlActivityParser.EDGE_SOURCE_PREFIX}name:prep" })
+    }
+
+    @Test
+    fun finish_without_block_closure_reports_e001() {
+        val parser = PlantUmlActivityParser()
+        parser.acceptLine("start")
+        parser.acceptLine(":Work;")
+        parser.finish(blockClosed = false)
+        assertTrue(parser.diagnosticsSnapshot().any { it.code == "PLANTUML-E001" }, parser.diagnosticsSnapshot().toString())
+    }
+
+    @Test
+    fun uppercase_fork_variants_are_accepted() {
+        val parser = parse(
+            """
+            FORK
+              :A;
+            FORK AGAIN
+              :B;
+            END FORK
+            """.trimIndent() + "\n",
+        )
+        assertTrue(parser.diagnosticsSnapshot().isEmpty(), parser.diagnosticsSnapshot().toString())
+        val block = assertIs<ActivityBlock.ForkJoin>(visibleBlocks(assertIs<ActivityIR>(parser.snapshot())).single())
+        assertEquals(2, block.branches.size)
+    }
+
+    @Test
+    fun fork_with_three_branches_is_parsed() {
+        val parser = parse(
+            """
+            fork
+              :A;
+            fork again
+              :B;
+            fork again
+              :C;
+            end fork
+            """.trimIndent() + "\n",
+        )
+        assertTrue(parser.diagnosticsSnapshot().isEmpty(), parser.diagnosticsSnapshot().toString())
+        val block = assertIs<ActivityBlock.ForkJoin>(visibleBlocks(assertIs<ActivityIR>(parser.snapshot())).single())
+        assertEquals(3, block.branches.size)
+    }
+
+    @Test
+    fun unclosed_partition_reports_e007_on_finish() {
+        val parser = parse(
+            """
+            partition P {
+              :Work;
+            """.trimIndent() + "\n",
+        )
+        assertTrue(parser.diagnosticsSnapshot().any { it.code == "PLANTUML-E007" })
+    }
+
+    @Test
+    fun stray_end_note_reports_diagnostic() {
+        val parser = parse("end note\n:After;\n")
+        assertTrue(parser.diagnosticsSnapshot().any { it.code == "PLANTUML-E007" })
+        val ir = assertIs<ActivityIR>(parser.snapshot())
+        assertEquals(ActivityBlock.Action(RichLabel.Plain("After")), visibleBlocks(ir).single())
+    }
+
+    @Test
+    fun unsupported_skinparam_reports_w001() {
+        val parser = parse("skinparam nonsenseKey value\n:Work;\n")
+        assertTrue(parser.diagnosticsSnapshot().any { it.code == "PLANTUML-W001" })
+    }
+
+    @Test
+    fun error_diagnostics_are_streaming_equivalent() {
+        val src = "if (x)\n  :A;\n  elseif\n  end note\n  :B;\nendif\n"
+        assertEquals(parse(src).diagnosticsSnapshot(), parse(src, chunkSize = 1).diagnosticsSnapshot())
+    }
 }

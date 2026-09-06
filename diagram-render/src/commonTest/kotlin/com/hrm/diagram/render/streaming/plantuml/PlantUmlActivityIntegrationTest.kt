@@ -293,6 +293,23 @@ class PlantUmlActivityIntegrationTest {
         assertTrue(texts.contains("B2"))
     }
 
+    @Test
+    fun legacy_stop_ref_does_not_duplicate_stop_edge() {
+        val snapshot = run(
+            """
+            @startuml
+            (*) --> "First Action" as A1
+            A1 --> (*)
+            @enduml
+            """.trimIndent() + "\n",
+            3,
+        )
+        assertIs<ActivityIR>(snapshot.ir)
+        assertTrue(snapshot.diagnostics.isEmpty(), snapshot.diagnostics.toString())
+        val toStop = snapshot.laidOut!!.edgeRoutes.filter { it.to.value.startsWith("stop#") }
+        assertEquals(1, toStop.size, "expected exactly one A1→stop route, got: ${toStop.map { "${it.from}->${it.to}" }}")
+    }
+
     private fun run(src: String, chunkSize: Int) = Diagram.session(SourceLanguage.PLANTUML).let { s ->
         try {
             var i = 0
