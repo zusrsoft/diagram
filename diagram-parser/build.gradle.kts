@@ -48,7 +48,9 @@ kotlin {
 mavenPublishing {
     publishToMavenCentral(true)
 
-    signAllPublications()
+    if (!project.hasProperty("signing.skip")) {
+        signAllPublications()
+    }
 
     coordinates("io.github.huarangmeng", "diagram-parser", rootProject.property("VERSION").toString())
 
