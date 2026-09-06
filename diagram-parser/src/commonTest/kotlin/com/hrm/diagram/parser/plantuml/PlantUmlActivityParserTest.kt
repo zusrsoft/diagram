@@ -373,4 +373,72 @@ class PlantUmlActivityParserTest {
             """.trimIndent() + "\n"
         assertEquals(parse(src).snapshot(), parse(src, chunkSize = 1).snapshot())
     }
+
+    @Test
+    fun unmatched_endif_does_not_corrupt_root_frame() {
+        val parser = parse(
+            """
+            start
+            endif
+            :Load data;
+            stop
+            """.trimIndent() + "\n",
+        )
+        assertTrue(parser.diagnosticsSnapshot().any { it.code == "PLANTUML-E007" })
+        val ir = assertIs<ActivityIR>(parser.snapshot())
+        assertEquals(ActivityBlock.Action(RichLabel.Plain("Load data")), visibleBlocks(ir).single())
+    }
+
+    @Test
+    fun unmatched_endif_does_not_drop_enclosing_while_frame() {
+        val parser = parse(
+            """
+            while (condition)
+              :Load;
+            endif
+              :Next;
+            endwhile
+            """.trimIndent() + "\n",
+        )
+        assertTrue(parser.diagnosticsSnapshot().any { it.code == "PLANTUML-E007" })
+        val ir = assertIs<ActivityIR>(parser.snapshot())
+        val block = assertIs<ActivityBlock.While>(visibleBlocks(ir).single())
+        assertEquals(RichLabel.Plain("condition"), block.cond)
+        assertEquals(2, block.body.size)
+    }
+
+    @Test
+    fun invalid_repeat_while_does_not_drop_repeat_frame() {
+        val parser = parse(
+            """
+            repeat
+              :Load;
+            repeat while invalid
+              :Next;
+            repeat while (condition)
+            """.trimIndent() + "\n",
+        )
+        assertTrue(parser.diagnosticsSnapshot().any { it.code == "PLANTUML-E007" })
+        val ir = assertIs<ActivityIR>(parser.snapshot())
+        val block = assertIs<ActivityBlock.While>(visibleBlocks(ir).single())
+        assertEquals(RichLabel.Plain(PlantUmlActivityParser.REPEAT_PREFIX + "condition"), block.cond)
+        assertEquals(2, block.body.size)
+    }
+
+    @Test
+    fun unmatched_closes_do_not_drop_root_frame() {
+        val closers = listOf("endif", "endwhile", "repeat while (condition)", "end fork")
+        for (closer in closers) {
+            val parser = PlantUmlActivityParser()
+            parser.acceptLine(closer)
+            parser.acceptLine(":After;")
+            parser.finish(blockClosed = true)
+            assertTrue(
+                parser.diagnosticsSnapshot().any { it.code == "PLANTUML-E007" },
+                "missing diagnostic for '$closer'",
+            )
+            val ir = assertIs<ActivityIR>(parser.snapshot())
+            assertEquals(ActivityBlock.Action(RichLabel.Plain("After")), visibleBlocks(ir).single())
+        }
+    }
 }

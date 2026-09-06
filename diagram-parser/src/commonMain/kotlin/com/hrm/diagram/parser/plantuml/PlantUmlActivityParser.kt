@@ -258,7 +258,8 @@ class PlantUmlActivityParser {
 
     fun diagnosticsSnapshot(): List<Diagnostic> = session.diagnosticsSnapshot()
 
-    private fun currentTarget(): MutableList<ActivityBlock> = frames.last().target
+    private fun currentTarget(): MutableList<ActivityBlock> =
+        frames.lastOrNull()?.target ?: error("PlantUML parser frame stack is corrupted: root frame missing")
     private val styleExtras: LinkedHashMap<String, String> = LinkedHashMap()
 
     private fun addBlock(block: ActivityBlock): IrPatchBatch {
@@ -343,7 +344,8 @@ class PlantUmlActivityParser {
     }
 
     private fun closeIf(): IrPatchBatch {
-        val frame = frames.removeLastOrNull() as? Frame.IfFrame ?: return errorBatch("'endif' without matching 'if'")
+        val frame = frames.lastOrNull() as? Frame.IfFrame ?: return errorBatch("'endif' without matching 'if'")
+        frames.removeLast()
         frame.incomingSourceRef?.let { currentTarget() += ActivityBlock.Note(RichLabel.Plain(EDGE_SOURCE_PREFIX + it)) }
         frame.incomingEdgeLabel?.let { currentTarget() += ActivityBlock.Note(RichLabel.Plain(EDGE_LABEL_PREFIX + it)) }
         currentTarget() += buildIfElse(frame.branches)
@@ -358,7 +360,8 @@ class PlantUmlActivityParser {
     }
 
     private fun closeWhile(): IrPatchBatch {
-        val frame = frames.removeLastOrNull() as? Frame.WhileFrame ?: return errorBatch("'endwhile' without matching 'while'")
+        val frame = frames.lastOrNull() as? Frame.WhileFrame ?: return errorBatch("'endwhile' without matching 'while'")
+        frames.removeLast()
         currentTarget() += ActivityBlock.While(cond = frame.cond, body = frame.body.toList())
         return session.emptyBatch()
     }
@@ -369,9 +372,10 @@ class PlantUmlActivityParser {
     }
 
     private fun closeRepeat(line: String): IrPatchBatch {
-        val frame = frames.removeLastOrNull() as? Frame.RepeatFrame ?: return errorBatch("'repeat while' without matching 'repeat'")
+        val frame = frames.lastOrNull() as? Frame.RepeatFrame ?: return errorBatch("'repeat while' without matching 'repeat'")
         val cond = extractParenCondition(line.removePrefix("repeat while").trim())
             ?: return errorBatch("Invalid PlantUML activity repeat syntax: $line")
+        frames.removeLast()
         currentTarget() += ActivityBlock.While(cond = RichLabel.Plain(REPEAT_PREFIX + cond), body = frame.body.toList())
         return session.emptyBatch()
     }
@@ -389,7 +393,8 @@ class PlantUmlActivityParser {
     }
 
     private fun closeFork(): IrPatchBatch {
-        val frame = frames.removeLastOrNull() as? Frame.ForkFrame ?: return errorBatch("'end fork' without matching 'fork'")
+        val frame = frames.lastOrNull() as? Frame.ForkFrame ?: return errorBatch("'end fork' without matching 'fork'")
+        frames.removeLast()
         currentTarget() += ActivityBlock.ForkJoin(branches = frame.branches.map { it.toList() })
         return session.emptyBatch()
     }
