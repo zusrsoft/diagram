@@ -53,13 +53,13 @@ mavenPublishing {
         signAllPublications()
     }
 
-    coordinates("io.github.huarangmeng", "diagram-layout", rootProject.property("VERSION").toString())
+    coordinates("io.github.zusrsoft", "diagram-layout", rootProject.property("VERSION").toString())
 
     pom {
         name.set("Diagram Layout")
         description.set("Cross-platform layout algorithms for Mermaid, PlantUML, and DOT diagrams.")
         inceptionYear.set("2026")
-        url.set("https://github.com/huarangmeng/diagram")
+        url.set("https://github.com/zusrsoft/diagram")
         licenses {
             license {
                 name.set("MIT License")
@@ -69,15 +69,15 @@ mavenPublishing {
         }
         developers {
             developer {
-                id.set("huarangmeng")
-                name.set("huarangmeng")
-                url.set("https://github.com/huarangmeng/")
+                id.set("zusrsoft")
+                name.set("zusrsoft")
+                url.set("https://github.com/zusrsoft/")
             }
         }
         scm {
-            url.set("https://github.com/huarangmeng/diagram")
-            connection.set("scm:git:git://github.com/huarangmeng/diagram.git")
-            developerConnection.set("scm:git:ssh://git@github.com/huarangmeng/diagram.git")
+            url.set("https://github.com/zusrsoft/diagram")
+            connection.set("scm:git:git://github.com/zusrsoft/diagram.git")
+            developerConnection.set("scm:git:ssh://git@github.com/zusrsoft/diagram.git")
         }
     }
 }

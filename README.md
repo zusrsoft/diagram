@@ -2,7 +2,7 @@
 
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.3.20-blue.svg)](https://kotlinlang.org)
 [![Compose Multiplatform](https://img.shields.io/badge/Compose%20Multiplatform-1.10.3-brightgreen.svg)](https://www.jetbrains.com/lp/compose-multiplatform/)
-[![Maven Central](https://img.shields.io/maven-central/v/io.github.huarangmeng/diagram-render.svg?color=orange&label=Maven%20Central)](https://central.sonatype.com/search?q=io.github.huarangmeng%3Adiagram-render)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.zusrsoft/diagram-render.svg?color=orange&label=Maven%20Central)](https://central.sonatype.com/search?q=io.github.zusrsoft%3Adiagram-render)
 [![Android API](https://img.shields.io/badge/Android%20API-23%2B-brightgreen.svg)](https://android-arsenal.com/api?level=23)
 [![Syntax](https://img.shields.io/badge/Syntax-Mermaid%20%7C%20PlantUML%20%7C%20DOT-orange.svg)](./docs/syntax-compat/)
 
@@ -59,7 +59,7 @@ Add `diagram-render` if you want the full parsing, layout, and Compose rendering
 diagram = "1.0.4"
 
 [libraries]
-diagram-render = { module = "io.github.huarangmeng:diagram-render", version.ref = "diagram" }
+diagram-render = { module = "io.github.zusrsoft:diagram-render", version.ref = "diagram" }
 ```
 
 ```kotlin
@@ -72,9 +72,9 @@ Use lower-level modules directly only when you need a subset of the stack.
 
 ```kotlin
 dependencies {
-    implementation("io.github.huarangmeng:diagram-core:1.0.4")
-    implementation("io.github.huarangmeng:diagram-layout:1.0.4")
-    implementation("io.github.huarangmeng:diagram-parser:1.0.4")
+    implementation("io.github.zusrsoft:diagram-core:1.0.4")
+    implementation("io.github.zusrsoft:diagram-layout:1.0.4")
+    implementation("io.github.zusrsoft:diagram-parser:1.0.4")
 }
 ```
 
