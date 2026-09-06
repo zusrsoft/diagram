@@ -188,10 +188,10 @@ class PlantUmlActivityParser {
             trimmed.startsWith("#") && ':' in trimmed -> addStyledAction(trimmed)
             trimmed.startsWith(":") && trimmed.endsWith(";") -> addBlock(ActivityBlock.Action(RichLabel.Plain(trimmed.removePrefix(":").removeSuffix(";").trim())))
             trimmed.startsWith("if(", ignoreCase = true) ||
-                (trimmed.startsWith("if ", ignoreCase = true) && extractParenCondition(trimmed.removePrefix("if").trim()) != null) -> openIf(trimmed)
+                (trimmed.startsWith("if ", ignoreCase = true) && extractParenCondition(removePrefixIgnoreCase(trimmed, "if").trim()) != null) -> openIf(trimmed)
             isLegacyIf(trimmed) -> openLegacyIf(trimmed)
             trimmed.startsWith("elseif ", ignoreCase = true) || trimmed.startsWith("elseif(", ignoreCase = true) -> switchElseIf(trimmed)
-            trimmed.startsWith("else", ignoreCase = true) -> switchElse()
+            isElseKeyword(trimmed) -> switchElse()
             trimmed.equals("endif", ignoreCase = true) -> closeIf()
             trimmed.startsWith("while ", ignoreCase = true) || trimmed.startsWith("while(", ignoreCase = true) -> openWhile(trimmed)
             trimmed.equals("endwhile", ignoreCase = true) -> closeWhile()
@@ -260,6 +260,7 @@ class PlantUmlActivityParser {
 
     private fun currentTarget(): MutableList<ActivityBlock> =
         frames.lastOrNull()?.target ?: error("PlantUML parser frame stack is corrupted: root frame missing")
+
     private val styleExtras: LinkedHashMap<String, String> = LinkedHashMap()
 
     private fun addBlock(block: ActivityBlock): IrPatchBatch {
@@ -286,7 +287,7 @@ class PlantUmlActivityParser {
         val text = when {
             line.startsWith("note:", ignoreCase = true) -> line.substringAfter(':').trim()
             ':' in line -> line.substringAfter(':').trim()
-            else -> line.removePrefix("note").trim()
+            else -> removePrefixIgnoreCase(line, "note").trim()
         }
         return addBlock(ActivityBlock.Note(RichLabel.Plain(text)))
     }
@@ -307,7 +308,7 @@ class PlantUmlActivityParser {
     }
 
     private fun openIf(line: String): IrPatchBatch {
-        val cond = extractParenCondition(line.removePrefix("if").trim())
+        val cond = extractParenCondition(removePrefixIgnoreCase(line, "if").trim())
             ?: return errorBatch("Invalid PlantUML activity if syntax: $line")
         frames.addLast(Frame.IfFrame(branches = mutableListOf(IfBranch(cond = RichLabel.Plain(cond)))))
         return session.emptyBatch()
@@ -336,7 +337,7 @@ class PlantUmlActivityParser {
     private fun switchElseIf(line: String): IrPatchBatch {
         val frame = frames.lastOrNull() as? Frame.IfFrame ?: return errorBatch("'elseif' without matching 'if'")
         if (frame.branches.last().cond == null) return errorBatch("'elseif' cannot appear after 'else'")
-        val cond = extractParenCondition(line.removePrefix("elseif").trim())
+        val cond = extractParenCondition(removePrefixIgnoreCase(line, "elseif").trim())
             ?: return errorBatch("Invalid PlantUML activity elseif syntax: $line")
         frame.branches += IfBranch(cond = RichLabel.Plain(cond))
         frame.activeIndex = frame.branches.lastIndex
@@ -373,7 +374,7 @@ class PlantUmlActivityParser {
 
     private fun closeRepeat(line: String): IrPatchBatch {
         val frame = frames.lastOrNull() as? Frame.RepeatFrame ?: return errorBatch("'repeat while' without matching 'repeat'")
-        val cond = extractParenCondition(line.removePrefix("repeat while").trim())
+        val cond = extractParenCondition(removePrefixIgnoreCase(line, "repeat while").trim())
             ?: return errorBatch("Invalid PlantUML activity repeat syntax: $line")
         frames.removeLast()
         currentTarget() += ActivityBlock.While(cond = RichLabel.Plain(REPEAT_PREFIX + cond), body = frame.body.toList())
@@ -515,7 +516,7 @@ class PlantUmlActivityParser {
     private fun parseLegacyIfCondition(line: String): String? {
         if (!line.startsWith("if ", ignoreCase = true)) return null
         val body = line.substring(2).trim()
-        val thenIndex = body.lowercase().indexOf(" then")
+        val thenIndex = body.indexOf(" then", ignoreCase = true)
         if (thenIndex <= 0) return null
         val condPart = body.substring(0, thenIndex).trim()
         return when {
@@ -528,7 +529,7 @@ class PlantUmlActivityParser {
     private fun parsePartitionDecl(line: String): Pair<String, String?>? {
         if (!line.startsWith("partition ", ignoreCase = true)) return null
         if (!line.endsWith("{")) return null
-        val body = line.substringAfter("partition", "").removeSuffix("{").trim()
+        val body = removePrefixIgnoreCase(line, "partition").removeSuffix("{").trim()
         if (body.isEmpty()) return null
         val colorIndex = body.lastIndexOf(" #")
         return if (colorIndex >= 0) {
@@ -557,7 +558,7 @@ class PlantUmlActivityParser {
             val nested = parseLegacyTarget(trimmed.substringAfter(':').trim())
             return if (nested.kind == LegacyTarget.Kind.Action) nested.copy(color = color) else nested
         }
-        val aliasIndex = trimmed.lastIndexOf(" as ")
+        val aliasIndex = trimmed.lastIndexOf(" as ", ignoreCase = true)
         if (aliasIndex > 0) {
             val labelPart = trimmed.substring(0, aliasIndex).trim()
             val alias = trimmed.substring(aliasIndex + 4).trim()
@@ -649,7 +650,7 @@ class PlantUmlActivityParser {
             return session.emptyBatch()
         }
         if (body.startsWith("activity ", ignoreCase = true)) {
-            return applySkinparamEntry(body.removePrefix("activity").trim())
+            return applySkinparamEntry(removePrefixIgnoreCase(body, "activity").trim())
         }
         val key = body.substringBefore(' ', "").trim()
         val value = body.substringAfter(' ', "").trim()
@@ -745,6 +746,15 @@ class PlantUmlActivityParser {
 
     private fun extractParenCondition(body: String): String? =
         Regex("^\\s*\\((.*?)\\)").find(body)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() }
+
+    private fun removePrefixIgnoreCase(line: String, prefix: String): String =
+        if (line.startsWith(prefix, ignoreCase = true)) line.drop(prefix.length) else line
+
+    private fun isElseKeyword(line: String): Boolean {
+        if (!line.startsWith("else", ignoreCase = true)) return false
+        val next = line.getOrNull(4)
+        return next == null || next.isWhitespace() || next == '('
+    }
 
     private fun buildIfElse(branches: List<IfBranch>): ActivityBlock.IfElse {
         require(branches.isNotEmpty())

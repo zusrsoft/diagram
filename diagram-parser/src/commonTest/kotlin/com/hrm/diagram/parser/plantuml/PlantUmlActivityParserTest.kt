@@ -441,4 +441,179 @@ class PlantUmlActivityParserTest {
             assertEquals(ActivityBlock.Action(RichLabel.Plain("After")), visibleBlocks(ir).single())
         }
     }
+
+    @Test
+    fun unmatched_branch_switches_do_not_drop_root_frame() {
+        val switchers = listOf("else", "elseif (x)", "fork again")
+        for (switcher in switchers) {
+            val parser = PlantUmlActivityParser()
+            parser.acceptLine(switcher)
+            parser.acceptLine(":After;")
+            parser.finish(blockClosed = true)
+            assertTrue(
+                parser.diagnosticsSnapshot().any { it.code == "PLANTUML-E007" },
+                "missing diagnostic for '$switcher'",
+            )
+            val ir = assertIs<ActivityIR>(parser.snapshot())
+            assertEquals(ActivityBlock.Action(RichLabel.Plain("After")), visibleBlocks(ir).single())
+        }
+    }
+
+    @Test
+    fun uppercase_keywords_are_parsed_case_insensitively() {
+        val parser = parse(
+            """
+            IF (ready)
+              :Load;
+            ELSEIF (retry)
+              :Wait;
+            ELSE
+              :Skip;
+            ENDIF
+            REPEAT
+              :Step;
+            REPEAT WHILE (more)
+            WHILE (loop)
+              :Body;
+            ENDWHILE
+            PARTITION Ops {
+              :Deploy;
+            }
+            NOTE remark
+            """.trimIndent() + "\n",
+        )
+        assertTrue(parser.diagnosticsSnapshot().isEmpty(), parser.diagnosticsSnapshot().toString())
+        val ir = assertIs<ActivityIR>(parser.snapshot())
+        assertTrue(ir.blocks.any { it == ActivityBlock.Note(RichLabel.Plain("${PlantUmlActivityParser.SWIMLANE_PREFIX}Ops")) })
+
+        val visible = visibleBlocks(ir)
+        assertEquals(5, visible.size)
+
+        val branch = assertIs<ActivityBlock.IfElse>(visible[0])
+        assertEquals(RichLabel.Plain("ready"), branch.cond)
+        assertEquals(ActivityBlock.Action(RichLabel.Plain("Load")), branch.thenBranch.single())
+        val nested = assertIs<ActivityBlock.IfElse>(branch.elseBranch.single())
+        assertEquals(RichLabel.Plain("retry"), nested.cond)
+        assertEquals(ActivityBlock.Action(RichLabel.Plain("Wait")), nested.thenBranch.single())
+        assertEquals(ActivityBlock.Action(RichLabel.Plain("Skip")), nested.elseBranch.single())
+
+        val repeatLoop = assertIs<ActivityBlock.While>(visible[1])
+        assertEquals(RichLabel.Plain("${PlantUmlActivityParser.REPEAT_PREFIX}more"), repeatLoop.cond)
+        assertEquals(ActivityBlock.Action(RichLabel.Plain("Step")), repeatLoop.body.single())
+
+        val whileLoop = assertIs<ActivityBlock.While>(visible[2])
+        assertEquals(RichLabel.Plain("loop"), whileLoop.cond)
+        assertEquals(ActivityBlock.Action(RichLabel.Plain("Body")), whileLoop.body.single())
+
+        assertEquals(ActivityBlock.Action(RichLabel.Plain("Deploy")), visible[3])
+        assertEquals(ActivityBlock.Note(RichLabel.Plain("remark")), visible[4])
+    }
+
+    @Test
+    fun uppercase_skinparam_activity_prefix_is_accepted() {
+        val ir = assertIs<ActivityIR>(
+            parse(
+                """
+                skinparam ACTIVITY StartColor red
+                :Work;
+                """.trimIndent() + "\n",
+            ).snapshot(),
+        )
+        assertEquals("red", ir.styleHints.extras[PlantUmlActivityParser.STYLE_START_FILL_KEY])
+    }
+
+    @Test
+    fun compact_if_and_uppercase_note_placement_are_parsed() {
+        val parser = parse(
+            """
+            IF(x)
+              :Load;
+            ENDIF
+            NOTE right: text
+            """.trimIndent() + "\n",
+        )
+        assertTrue(parser.diagnosticsSnapshot().isEmpty(), parser.diagnosticsSnapshot().toString())
+        val visible = visibleBlocks(assertIs<ActivityIR>(parser.snapshot()))
+        val branch = assertIs<ActivityBlock.IfElse>(visible[0])
+        assertEquals(RichLabel.Plain("x"), branch.cond)
+        assertEquals(ActivityBlock.Action(RichLabel.Plain("Load")), branch.thenBranch.single())
+        assertEquals(ActivityBlock.Note(RichLabel.Plain("text")), visible[1])
+    }
+
+    @Test
+    fun uppercase_alias_keyword_is_recognized() {
+        val parser = parse(
+            """
+            (*) --> "First Action" AS A1
+            A1 --> (*)
+            """.trimIndent() + "\n",
+        )
+        assertTrue(parser.diagnosticsSnapshot().isEmpty(), parser.diagnosticsSnapshot().toString())
+        val ir = assertIs<ActivityIR>(parser.snapshot())
+        val texts = ir.blocks.mapNotNull { (it as? ActivityBlock.Note)?.text as? RichLabel.Plain }.map { it.text }
+        assertTrue(texts.any { it == "${PlantUmlActivityParser.NODE_REF_PREFIX}name:A1" })
+        assertTrue(texts.any { it == "${PlantUmlActivityParser.EDGE_STOP_PREFIX}name:A1" })
+        val actions = ir.blocks.filterIsInstance<ActivityBlock.Action>()
+        assertEquals(listOf(ActivityBlock.Action(RichLabel.Plain("First Action"))), actions)
+    }
+
+    @Test
+    fun else_prefixed_word_is_not_silently_treated_as_else_branch() {
+        val parser = parse(
+            """
+            if (ok?) then (yes)
+              :Done;
+            elsewhere
+              :Fallback;
+            endif
+            """.trimIndent() + "\n",
+        )
+        assertTrue(parser.diagnosticsSnapshot().any { it.code == "PLANTUML-E007" })
+        val ir = assertIs<ActivityIR>(parser.snapshot())
+        val block = assertIs<ActivityBlock.IfElse>(visibleBlocks(ir).single())
+        assertEquals(2, block.thenBranch.size)
+        assertEquals(emptyList(), block.elseBranch)
+    }
+
+    @Test
+    fun else_with_tab_separator_is_accepted() {
+        val parser = parse(
+            """
+            if (ok?) then (yes)
+              :Done;
+            else${'\t'}(no)
+              :Retry;
+            endif
+            """.trimIndent() + "\n",
+        )
+        assertTrue(parser.diagnosticsSnapshot().isEmpty(), parser.diagnosticsSnapshot().toString())
+        val block = assertIs<ActivityBlock.IfElse>(visibleBlocks(assertIs<ActivityIR>(parser.snapshot())).single())
+        assertEquals(ActivityBlock.Action(RichLabel.Plain("Done")), block.thenBranch.single())
+        assertEquals(ActivityBlock.Action(RichLabel.Plain("Retry")), block.elseBranch.single())
+    }
+
+    @Test
+    fun alias_keyword_matching_last_occurrence_wins_over_embedded_label_text() {
+        val parser = parse(
+            """
+            (*) --> "A as B" as C
+            C --> (*)
+            """.trimIndent() + "\n",
+        )
+        assertTrue(parser.diagnosticsSnapshot().isEmpty(), parser.diagnosticsSnapshot().toString())
+        val ir = assertIs<ActivityIR>(parser.snapshot())
+        val texts = ir.blocks.mapNotNull { (it as? ActivityBlock.Note)?.text as? RichLabel.Plain }.map { it.text }
+        assertTrue(texts.any { it == "${PlantUmlActivityParser.NODE_REF_PREFIX}name:C" })
+        val actions = ir.blocks.filterIsInstance<ActivityBlock.Action>()
+        assertEquals(listOf(ActivityBlock.Action(RichLabel.Plain("A as B"))), actions)
+    }
+
+    @Test
+    fun legacy_if_with_expanding_lowercase_label_is_parsed_without_throwing() {
+        val parser = parse("if \"İİİİİİ\" then\n  :Done;\nendif\n")
+        assertTrue(parser.diagnosticsSnapshot().isEmpty(), parser.diagnosticsSnapshot().toString())
+        val block = assertIs<ActivityBlock.IfElse>(visibleBlocks(assertIs<ActivityIR>(parser.snapshot())).single())
+        assertEquals(RichLabel.Plain("İİİİİİ"), block.cond)
+        assertEquals(ActivityBlock.Action(RichLabel.Plain("Done")), block.thenBranch.single())
+    }
 }
