@@ -1,5 +1,5 @@
 plugins {
-    alias(libs.plugins.kotlinMultiplatform)
+    alias(libs.plugins.kotlin.multiplatform)
 }
 
 kotlin {
@@ -12,11 +12,11 @@ kotlin {
             implementation(projects.diagramLayout)
             implementation(projects.diagramParser)
             implementation(projects.diagramRender)
-            implementation(libs.kotlinx.coroutinesCore)
+            implementation(libs.kotlinx.coroutines.core)
         }
         jvmTest.dependencies {
             implementation(libs.kotlin.test)
-            implementation(libs.kotlinx.coroutinesTest)
+            implementation(libs.kotlinx.coroutines.test)
         }
     }
 }
