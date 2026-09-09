@@ -10,6 +10,10 @@
 
 [English Version](./README.md)
 
+## 署名
+
+原作者：[huarangmeng](https://github.com/huarangmeng/diagram)；本项目现由 [zusrsoft](https://github.com/zusrsoft/diagram) 独立维护。
+
 ## 图像预览
 
 ### Mermaid
@@ -56,7 +60,7 @@
 
 ```toml
 [versions]
-diagram = "1.0.4"
+diagram = "1.0.5"
 
 [libraries]
 diagram-render = { module = "io.github.zusrsoft:diagram-render", version.ref = "diagram" }
@@ -72,9 +76,9 @@ dependencies {
 
 ```kotlin
 dependencies {
-    implementation("io.github.zusrsoft:diagram-core:1.0.4")
-    implementation("io.github.zusrsoft:diagram-layout:1.0.4")
-    implementation("io.github.zusrsoft:diagram-parser:1.0.4")
+    implementation("io.github.zusrsoft:diagram-core:1.0.5")
+    implementation("io.github.zusrsoft:diagram-layout:1.0.5")
+    implementation("io.github.zusrsoft:diagram-parser:1.0.5")
 }
 ```
 
@@ -165,3 +169,7 @@ fun MermaidPreview(source: String) {
 - [阶段计划与进度](./docs/plan.md)
 - [测试策略](./docs/testing.md)
 - [贡献指南](./docs/contributing.md)
+
+## License
+
+本项目基于 MIT License 授权发布 - 详见 [LICENSE](./LICENSE) 文件。

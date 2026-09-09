@@ -10,6 +10,10 @@ A Kotlin Multiplatform diagram rendering SDK with self-hosted parsing, layout, a
 
 [中文版本](./README_zh.md)
 
+## Credits
+
+Original author: [huarangmeng](https://github.com/huarangmeng/diagram). This project is now independently maintained by [zusrsoft](https://github.com/zusrsoft/diagram).
+
 ## Preview
 
 ### Mermaid
@@ -56,7 +60,7 @@ Add `diagram-render` if you want the full parsing, layout, and Compose rendering
 
 ```toml
 [versions]
-diagram = "1.0.4"
+diagram = "1.0.5"
 
 [libraries]
 diagram-render = { module = "io.github.zusrsoft:diagram-render", version.ref = "diagram" }
@@ -72,9 +76,9 @@ Use lower-level modules directly only when you need a subset of the stack.
 
 ```kotlin
 dependencies {
-    implementation("io.github.zusrsoft:diagram-core:1.0.4")
-    implementation("io.github.zusrsoft:diagram-layout:1.0.4")
-    implementation("io.github.zusrsoft:diagram-parser:1.0.4")
+    implementation("io.github.zusrsoft:diagram-core:1.0.5")
+    implementation("io.github.zusrsoft:diagram-layout:1.0.5")
+    implementation("io.github.zusrsoft:diagram-parser:1.0.5")
 }
 ```
 
@@ -165,3 +169,7 @@ fun MermaidPreview(source: String) {
 - [Plan and Phase Status](./docs/plan.md)
 - [Testing Strategy](./docs/testing.md)
 - [Contributing Guide](./docs/contributing.md)
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](./LICENSE) file for details.
